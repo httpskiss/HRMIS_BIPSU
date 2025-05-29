@@ -5,7 +5,7 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-require 'auth/db.php"'; // Adjust path as needed
+require 'auth/db.php'; // Adjust path as needed
 
 // Fetch total employees count
 $totalEmployees = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -31,46 +31,69 @@ $recentCheckins = $pdo->query("
     LIMIT 5
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch employee distribution by department
-$departmentDistribution = $pdo->query("
-    SELECT department, COUNT(*) as count 
-    FROM users 
-    GROUP BY department
-")->fetchAll(PDO::FETCH_ASSOC);
+$facultyCount = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'employee'")->fetchColumn();
 
-// Prepare data for chart
-$deptLabels = [];
-$deptData = [];
-foreach ($departmentDistribution as $dept) {
-    $deptLabels[] = $dept['department'];
-    $deptData[] = $dept['count'];
-}
-
-// Fetch recent employees
-$recentEmployees = $pdo->query("
-    SELECT id, first_name, last_name, email, department, role 
-    FROM users 
-    ORDER BY created_at DESC 
-    LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
-
-$facultyCount = $pdo->query("SELECT COUNT(*) FROM users WHERE category = 'faculty'")->fetchColumn();
+$total_users = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'employee'")->fetchColumn();
 
 // Fetch employee distribution by department
 $departmentDistribution = $pdo->query("
     SELECT department, COUNT(*) as count 
     FROM users 
     GROUP BY department
-    ORDER BY count DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Prepare data for chart
+// Fetch unique schools for the filter dropdown
+$schools = $pdo->query("
+    SELECT DISTINCT department as school 
+    FROM users 
+    ORDER BY department
+")->fetchAll(PDO::FETCH_COLUMN);
+
+// Prepare data for chart with color mapping
 $deptLabels = [];
 $deptData = [];
-foreach ($departmentDistribution as $dept) {
+$colorMap = []; // We'll use this to maintain consistent colors
+
+$colorPalette = [
+    'rgba(54, 162, 235, 0.6)',
+    'rgba(255, 99, 132, 0.6)',
+    'rgba(255, 206, 86, 0.6)',
+    'rgba(75, 192, 192, 0.6)',
+    'rgba(153, 102, 255, 0.6)',
+    'rgba(255, 159, 64, 0.6)',
+    'rgba(199, 199, 199, 0.6)',
+    'rgba(83, 102, 255, 0.6)'
+];
+
+$borderPalette = [
+    'rgba(54, 162, 235, 1)',
+    'rgba(255, 99, 132, 1)',
+    'rgba(255, 206, 86, 1)',
+    'rgba(75, 192, 192, 1)',
+    'rgba(153, 102, 255, 1)',
+    'rgba(255, 159, 64, 1)',
+    'rgba(199, 199, 199, 1)',
+    'rgba(83, 102, 255, 1)'
+];
+
+foreach ($departmentDistribution as $index => $dept) {
     $deptLabels[] = $dept['department'];
     $deptData[] = $dept['count'];
+    $colorIndex = $index % count($colorPalette); // Cycle through colors
+    $colorMap[$dept['department']] = [
+        'background' => $colorPalette[$colorIndex],
+        'border' => $borderPalette[$colorIndex]
+    ];
 }
+
+
+$employees = $pdo->query("
+    SELECT id, first_name, last_name, email, employee_id, department, role, category, created_at 
+    FROM users 
+    ORDER BY created_at DESC
+    LIMIT 0, 5  
+")->fetchAll(PDO::FETCH_ASSOC);
+
 
 ?>
 
@@ -304,12 +327,12 @@ foreach ($departmentDistribution as $dept) {
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                     <!-- Department Distribution -->
                     <div class="bg-white rounded-lg shadow p-6 lg:col-span-2">
-                       <div class="flex justify-between items-center mb-4">
+                        <div class="flex justify-between items-center mb-4">
                             <h2 class="text-lg font-semibold">Employee Distribution by Department</h2>
-                            <select id="departmentFilter" class="border rounded px-3 py-1 text-sm">
+                            <select id="schoolFilter" class="border rounded px-3 py-1 text-sm">
                                 <option value="all">All Departments</option>
-                                <?php foreach ($deptLabels as $dept): ?>
-                                    <option value="<?= htmlspecialchars($dept) ?>"><?= htmlspecialchars($dept) ?></option>
+                                <?php foreach ($schools as $school): ?>
+                                    <option value="<?= htmlspecialchars($school) ?>"><?= htmlspecialchars($school) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -365,8 +388,8 @@ foreach ($departmentDistribution as $dept) {
                         </div>
                     </div>
                 </div>
-
-                 <!-- Employee Management Section -->
+                  
+                <!-- Employee Management Section -->
                 <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
                     <div class="flex justify-between items-center p-6 border-b">
                         <h2 class="text-lg font-semibold">Employee Management</h2>
@@ -381,131 +404,44 @@ foreach ($departmentDistribution as $dept) {
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee ID</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Position</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
+                                <?php foreach ($employees as $employee): ?>
                                 <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1001</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900"><?= htmlspecialchars($employee['employee_id']) ?></td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex items-center">
                                             <div class="flex-shrink-0 h-10 w-10">
-                                                <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/32.jpg" alt="">
+                                                <img class="h-10 w-10 rounded-full" src="https://ui-avatars.com/api/?name=<?= urlencode($employee['first_name'] . '+' . $employee['last_name']) ?>&background=random" alt="">
                                             </div>
                                             <div class="ml-4">
-                                                <div class="text-sm font-medium text-gray-900">Dr. John Smith</div>
-                                                <div class="text-sm text-gray-500">john.smith@university.edu</div>
+                                                <div class="text-sm font-medium text-gray-900"><?= htmlspecialchars($employee['first_name'] . ' ' . $employee['last_name']) ?></div>
+                                                <div class="text-sm text-gray-500"><?= htmlspecialchars($employee['email']) ?></div>
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Computer Science</td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Professor</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($employee['department']) ?></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($employee['role']) ?></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= htmlspecialchars($employee['category']) ?></td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                        <button class="text-red-600 hover:text-red-900">Delete</button>
+                                        <button class="text-blue-600 hover:text-blue-900 mr-3 edit-employee" data-id="<?= $employee['id'] ?>">Edit</button>
+                                        <button class="text-red-600 hover:text-red-900 delete-employee" data-id="<?= $employee['id'] ?>">Delete</button>
                                     </td>
                                 </tr>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1002</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="flex items-center">
-                                            <div class="flex-shrink-0 h-10 w-10">
-                                                <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/women/44.jpg" alt="">
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="text-sm font-medium text-gray-900">Dr. Sarah Johnson</div>
-                                                <div class="text-sm text-gray-500">sarah.j@university.edu</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Mathematics</td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Associate Professor</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                        <button class="text-red-600 hover:text-red-900">Delete</button>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1003</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="flex items-center">
-                                            <div class="flex-shrink-0 h-10 w-10">
-                                                <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/75.jpg" alt="">
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="text-sm font-medium text-gray-900">Prof. Michael Brown</div>
-                                                <div class="text-sm text-gray-500">michael.b@university.edu</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Physics</td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Professor</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">On Leave</span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                        <button class="text-red-600 hover:text-red-900">Delete</button>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1004</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="flex items-center">
-                                            <div class="flex-shrink-0 h-10 w-10">
-                                                <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/women/63.jpg" alt="">
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="text-sm font-medium text-gray-900">Dr. Lisa Ray</div>
-                                                <div class="text-sm text-gray-500">lisa.ray@university.edu</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Chemistry</td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Assistant Professor</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                        <button class="text-red-600 hover:text-red-900">Delete</button>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1005</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="flex items-center">
-                                            <div class="flex-shrink-0 h-10 w-10">
-                                                <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/42.jpg" alt="">
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="text-sm font-medium text-gray-900">Dr. Robert Wilson</div>
-                                                <div class="text-sm text-gray-500">robert.w@university.edu</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Administration</td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">HR Manager</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                        <button class="text-red-600 hover:text-red-900">Delete</button>
-                                    </td>
-                                </tr>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>
-                    <div class="bg-gray-50 px-6 py-3 flex items-center justify-between border-t border-gray-200">
+            
+                    <div class="bg-gray-50 px-6 py-3 flex items-center justify-between border-t border-gray-200 pagination-container">
                         <div class="flex-1 flex justify-between sm:hidden">
                             <a href="#" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Previous</a>
                             <a href="#" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Next</a>
@@ -536,8 +472,7 @@ foreach ($departmentDistribution as $dept) {
                         </div>
                     </div>
                 </div>
-
-                
+   
                 <!-- Attendance and Payroll Summary -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <!-- Attendance Summary -->
@@ -696,9 +631,6 @@ foreach ($departmentDistribution as $dept) {
     </div>
 
     <!-- Add Employee Modal -->
-    <!-- ... (same as before) ... -->
-
-     <!-- Add Employee Modal -->
     <div id="addEmployeeModal" class="modal fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-3xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center pb-3 border-b">
@@ -710,63 +642,71 @@ foreach ($departmentDistribution as $dept) {
             <div class="mt-4">
                 <form id="employeeForm">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Basic Information -->
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-                            <input type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <input type="text" name="first_name" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-                            <input type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <input type="text" name="last_name" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                            <input type="email" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <input type="email" name="email" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                            <input type="tel" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                            <input type="password" name="password" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                        </div>
+                        
+                        <!-- Work Information -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
+                            <input type="text" name="employee_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                            <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
-                                <option value="">Select Department</option>
-                                <option>Computer Science</option>
-                                <option>Mathematics</option>
-                                <option>Physics</option>
-                                <option>Chemistry</option>
-                                <option>Biology</option>
-                                <option>Administration</option>
-                                <option>Human Resources</option>
-                                <option>Finance</option>
+                            <select name="department" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                                 <option value="STCS">STCS</option>
+                                    <option value="SOE">SOE</option>
+                                    <option value="STED">STED</option>
+                                    <option value="SNHS">SNHS</option>
+                                    <option value="SCJE">SCJE</option>
+                                    <option value="SME">SME</option>
+                                    <option value="SAS">SAS</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Position</label>
-                            <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
-                                <option value="">Select Position</option>
-                                <option>Professor</option>
-                                <option>Associate Professor</option>
-                                <option>Assistant Professor</option>
-                                <option>Lecturer</option>
-                                <option>Researcher</option>
-                                <option>HR Manager</option>
-                                <option>Finance Officer</option>
-                                <option>Administrative Staff</option>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                            <select name="role" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                                <option value="">Select Role</option>
+                                <option value="employee">Employee</option>
+                                <option value="manager">Manager</option>
+                                <option value="admin">Admin</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
-                            <input type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Salary</label>
-                            <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                            <select name="category" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                <option value="staff">Staff</option>
+                                <option value="faculty">Faculty</option>
+                                <option value="admin">Admin</option>
+                            </select>
                         </div>
                     </div>
+                    
+                    <!-- Additional Fields -->
+                    <div class="mt-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                        <input type="tel" name="phone" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    
                     <div class="mt-6">
                         <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                        <textarea rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                        <textarea name="address" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
                     </div>
+                    
                     <div class="mt-6 flex justify-end space-x-3">
                         <button type="button" id="cancelAddEmployee" class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                             Cancel
@@ -779,6 +719,8 @@ foreach ($departmentDistribution as $dept) {
             </div>
         </div>
     </div>
+
+   
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
@@ -799,63 +741,81 @@ foreach ($departmentDistribution as $dept) {
             }
         });
 
-        // Department Distribution Chart
-            const departmentCtx = document.getElementById('departmentChart').getContext('2d');
-            const departmentChart = new Chart(departmentCtx, {
-                type: 'bar',
-                data: {
-                    labels: <?= json_encode($deptLabels) ?>,
-                    datasets: [{
-                        label: 'Employees',
-                        data: <?= json_encode($deptData) ?>,
-                        backgroundColor: [
-                            'rgba(54, 162, 235, 0.6)',
-                            'rgba(255, 99, 132, 0.6)',
-                            'rgba(255, 206, 86, 0.6)',
-                            'rgba(75, 192, 192, 0.6)',
-                            'rgba(153, 102, 255, 0.6)',
-                            'rgba(255, 159, 64, 0.6)',
-                            'rgba(199, 199, 199, 0.6)',
-                            'rgba(83, 102, 255, 0.6)'
-                        ],
-                        borderColor: [
-                            'rgba(54, 162, 235, 1)',
-                            'rgba(255, 99, 132, 1)',
-                            'rgba(255, 206, 86, 1)',
-                            'rgba(75, 192, 192, 1)',
-                            'rgba(153, 102, 255, 1)',
-                            'rgba(255, 159, 64, 1)',
-                            'rgba(199, 199, 199, 1)',
-                            'rgba(83, 102, 255, 1)'
-                        ],
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                precision: 0 // Ensures whole numbers on Y-axis
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.parsed.y + ' employees';
-                                }
-                            }
-                        }
+        // Initialize chart with color mapping from PHP
+const colorMap = <?= json_encode($colorMap) ?>;
+const allDepartmentsData = {
+    labels: <?= json_encode($deptLabels) ?>,
+    data: <?= json_encode($deptData) ?>,
+    backgroundColors: <?= json_encode($deptLabels) ?>.map(label => colorMap[label].background),
+    borderColors: <?= json_encode($deptLabels) ?>.map(label => colorMap[label].border)
+};
+
+const departmentCtx = document.getElementById('departmentChart').getContext('2d');
+const departmentChart = new Chart(departmentCtx, {
+    type: 'bar',
+    data: {
+        labels: allDepartmentsData.labels,
+        datasets: [{
+            label: 'Employees',
+            data: allDepartmentsData.data,
+            backgroundColor: allDepartmentsData.backgroundColors,
+            borderColor: allDepartmentsData.borderColors,
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    precision: 0
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.parsed.y + ' employees';
                     }
                 }
+            }
+        }
+    }
+});
+
+
+
+// Handle school filter change with AJAX
+document.getElementById('schoolFilter').addEventListener('change', function() {
+    const selectedSchool = this.value;
+    
+    if (selectedSchool === 'all') {
+        // Reset to show all departments with original colors
+        departmentChart.data.labels = allDepartmentsData.labels;
+        departmentChart.data.datasets[0].data = allDepartmentsData.data;
+        departmentChart.data.datasets[0].backgroundColor = allDepartmentsData.backgroundColors;
+        departmentChart.data.datasets[0].borderColor = allDepartmentsData.borderColors;
+        departmentChart.update();
+    } else {
+        // Filter for selected school
+        fetch(`get_department_data.php?school=${encodeURIComponent(selectedSchool)}`)
+            .then(response => response.json())
+            .then(data => {
+                // Update chart data while maintaining colors
+                departmentChart.data.labels = data.labels;
+                departmentChart.data.datasets[0].data = data.data;
+                departmentChart.data.datasets[0].backgroundColor = data.labels.map(label => colorMap[label]?.background || 'rgba(54, 162, 235, 0.6)');
+                departmentChart.data.datasets[0].borderColor = data.labels.map(label => colorMap[label]?.border || 'rgba(54, 162, 235, 1)');
+                departmentChart.update();
             });
+    }
+});
 
         // Rest of your JavaScript remains the same
         // ...
@@ -874,6 +834,432 @@ foreach ($departmentDistribution as $dept) {
                 window.location.href = 'logout.php';
             }
         });
-    </script>
+        
+        
+        document.addEventListener('DOMContentLoaded', function() {
+    // Toast notification function
+    function showToast(message, type = 'success') {
+        const toast = document.createElement('div');
+        toast.className = `fixed top-4 right-4 px-4 py-2 rounded-md shadow-md text-white ${
+            type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        } z-50`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // Handle form submission for adding/editing employee
+    const employeeForm = document.getElementById('employeeForm');
+    if (employeeForm) {
+        employeeForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const isEdit = formData.has('id');
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.textContent;
+
+            try {
+                // Show loading state
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Processing...';
+
+                const response = await fetch(isEdit ? 'update_employee.php' : 'add_employee.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(data.message || (isEdit ? "Employee updated successfully!" : "Employee added successfully!"), 'success');
+                    
+                    // Close modal if exists
+                    const modal = document.getElementById('addEmployeeModal');
+                    if (modal) modal.classList.add('hidden');
+                    
+                    // Refresh after 1 second
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast('Error: ' + (data.message || 'Operation failed'), 'error');
+                }
+            } catch (error) {
+                showToast('Network error: ' + error.message, 'error');
+            } finally {
+                // Reset button state
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+            }
+        });
+    }
+
+    // Handle delete employee
+    document.querySelectorAll('.delete-employee').forEach(button => {
+        button.addEventListener('click', async function() {
+            if (confirm('Are you sure you want to delete this employee?')) {
+                const employeeId = this.getAttribute('data-id');
+                const button = this;
+                
+                try {
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    
+                    const response = await fetch(`delete_employee.php?id=${employeeId}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showToast("Employee deleted successfully!", 'success');
+                        button.closest('tr').remove();
+                    } else {
+                        showToast('Error: ' + data.message, 'error');
+                    }
+                } catch (error) {
+                    showToast('Network error: ' + error.message, 'error');
+                } finally {
+                    button.innerHTML = '<i class="fas fa-trash"></i>';
+                }
+            }
+        });
+    });
+
+    // Handle edit employee
+    document.querySelectorAll('.edit-employee').forEach(button => {
+        button.addEventListener('click', async function() {
+            const employeeId = this.getAttribute('data-id');
+            const button = this;
+            
+            try {
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                
+                const response = await fetch(`get_employee.php?id=${employeeId}`);
+                const data = await response.json();
+
+                if (data.success && data.employee) {
+                    const emp = data.employee;
+                    const form = document.getElementById('employeeForm');
+                    const modal = document.getElementById('addEmployeeModal');
+
+                    // Fill form
+                    form.querySelector('[name="first_name"]').value = emp.first_name || '';
+                    form.querySelector('[name="last_name"]').value = emp.last_name || '';
+                    form.querySelector('[name="email"]').value = emp.email || '';
+                    form.querySelector('[name="employee_id"]').value = emp.employee_id || '';
+                    form.querySelector('[name="department"]').value = emp.department || '';
+                    form.querySelector('[name="role"]').value = emp.role || '';
+                    form.querySelector('[name="category"]').value = emp.category || 'staff';
+                    
+                    // Add hidden ID field if editing
+                    if (!form.querySelector('[name="id"]')) {
+                        const idInput = document.createElement('input');
+                        idInput.type = 'hidden';
+                        idInput.name = 'id';
+                        form.appendChild(idInput);
+                    }
+                    form.querySelector('[name="id"]').value = emp.id;
+
+                    // Update modal title
+                    modal.querySelector('h3').textContent = 'Edit Employee';
+
+                    // Show modal
+                    modal.classList.remove('hidden');
+                } else {
+                    showToast('Error: ' + (data.message || 'Employee not found'), 'error');
+                }
+            } catch (error) {
+                showToast('Network error: ' + error.message, 'error');
+            } finally {
+                button.innerHTML = '<i class="fas fa-edit"></i>';
+            }
+        });
+    });
+
+    // Reset form when adding new employee
+    const addEmployeeBtn = document.getElementById('addEmployeeBtn');
+    if (addEmployeeBtn) {
+        addEmployeeBtn.addEventListener('click', function() {
+            const form = document.getElementById('employeeForm');
+            const modal = document.getElementById('addEmployeeModal');
+            
+            form.reset();
+            modal.querySelector('h3').textContent = 'Add New Employee';
+            
+            // Remove ID field if exists
+            const idField = form.querySelector('[name="id"]');
+            if (idField) idField.remove();
+            
+            modal.classList.remove('hidden');
+        });
+    }
+
+    // Close modal handler
+    const closeModalBtn = document.getElementById('closeModal');
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', function() {
+            document.getElementById('addEmployeeModal').classList.add('hidden');
+        });
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Current page tracking
+    let currentPage = 1;
+    const itemsPerPage = 5;
+    
+    // Toast notification function
+    function showToast(message, type = 'success') {
+        const toast = document.createElement('div');
+        toast.className = `fixed top-4 right-4 px-4 py-2 rounded-md shadow-md text-white ${
+            type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        } z-50`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // Load employees for a specific page
+    async function loadEmployees(page = 1) {
+        try {
+            // Show loading state
+            const tableBody = document.querySelector('tbody');
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Loading employees...</td></tr>';
+            
+            const response = await fetch(`get_employees.php?page=${page}&per_page=${itemsPerPage}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                renderEmployees(data.employees);
+                updatePagination(data.total, page);
+                currentPage = page;
+            } else {
+                showToast('Error loading employees: ' + data.message, 'error');
+            }
+        } catch (error) {
+            showToast('Network error: ' + error.message, 'error');
+        }
+    }
+
+    // Render employees in the table
+    function renderEmployees(employees) {
+        const tableBody = document.querySelector('tbody');
+        tableBody.innerHTML = '';
+        
+        if (employees.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4">No employees found</td></tr>';
+            return;
+        }
+        
+        employees.forEach(emp => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${emp.employee_id}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0 h-10 w-10">
+                            <img class="h-10 w-10 rounded-full" src="https://ui-avatars.com/api/?name=${encodeURIComponent(emp.first_name + '+' + emp.last_name)}&background=random" alt="">
+                        </div>
+                        <div class="ml-4">
+                            <div class="text-sm font-medium text-gray-900">${emp.first_name} ${emp.last_name}</div>
+                            <div class="text-sm text-gray-500">${emp.email}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${emp.department}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${emp.role}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${emp.category || 'staff'}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <button class="text-blue-600 hover:text-blue-900 mr-3 edit-employee" data-id="${emp.id}">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="text-red-600 hover:text-red-900 delete-employee" data-id="${emp.id}">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+        
+        // Reattach event listeners
+        attachEventListeners();
+    }
+
+    // Update pagination controls
+    function updatePagination(totalItems, currentPage) {
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+        const paginationContainer = document.querySelector('.pagination-container');
+        
+        if (!paginationContainer) {
+            console.error('Pagination container not found');
+            return;
+        }
+        
+        let paginationHTML = `
+            <div class="flex-1 flex justify-between sm:hidden">
+                <button onclick="window.loadEmployees(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Previous
+                </button>
+                <button onclick="window.loadEmployees(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Next
+                </button>
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing <span class="font-medium">${(currentPage - 1) * itemsPerPage + 1}</span>
+                        to <span class="font-medium">${Math.min(currentPage * itemsPerPage, totalItems)}</span>
+                        of <span class="font-medium">${totalItems}</span> employees
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                        <button onclick="window.loadEmployees(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span class="sr-only">Previous</span>
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+        `;
+        
+        // Show limited page numbers with ellipsis
+        const maxVisiblePages = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+        let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+        
+        if (startPage > 1) {
+            paginationHTML += `
+                <button onclick="window.loadEmployees(1)" class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                    1
+                </button>
+                ${startPage > 2 ? '<span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">...</span>' : ''}
+            `;
+        }
+        
+        for (let i = startPage; i <= endPage; i++) {
+            paginationHTML += `
+                <button onclick="window.loadEmployees(${i})" class="${i === currentPage ? 'z-10 bg-blue-50 border-blue-500 text-blue-600' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'} relative inline-flex items-center px-4 py-2 border text-sm font-medium">
+                    ${i}
+                </button>
+            `;
+        }
+        
+        if (endPage < totalPages) {
+            paginationHTML += `
+                ${endPage < totalPages - 1 ? '<span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">...</span>' : ''}
+                <button onclick="window.loadEmployees(${totalPages})" class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                    ${totalPages}
+                </button>
+            `;
+        }
+        
+        paginationHTML += `
+                        <button onclick="window.loadEmployees(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span class="sr-only">Next</span>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </nav>
+                </div>
+            </div>
+        `;
+        
+        paginationContainer.innerHTML = paginationHTML;
+    }
+
+    // Attach event listeners to dynamic elements
+    function attachEventListeners() {
+        // Delete employee
+        document.querySelectorAll('.delete-employee').forEach(button => {
+            button.addEventListener('click', async function() {
+                if (confirm('Are you sure you want to delete this employee?')) {
+                    const employeeId = this.getAttribute('data-id');
+                    const button = this;
+                    
+                    try {
+                        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                        
+                        const response = await fetch(`delete_employee.php?id=${employeeId}`);
+                        const data = await response.json();
+
+                        if (data.success) {
+                            showToast("Employee deleted successfully!", 'success');
+                            loadEmployees(currentPage);
+                        } else {
+                            showToast('Error: ' + data.message, 'error');
+                        }
+                    } catch (error) {
+                        showToast('Network error: ' + error.message, 'error');
+                    }
+                }
+            });
+        });
+
+        // Edit employee
+        document.querySelectorAll('.edit-employee').forEach(button => {
+            button.addEventListener('click', async function() {
+                const employeeId = this.getAttribute('data-id');
+                const button = this;
+                
+                try {
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    
+                    const response = await fetch(`get_employee.php?id=${employeeId}`);
+                    const data = await response.json();
+
+                    if (data.success && data.employee) {
+                        const emp = data.employee;
+                        const form = document.getElementById('employeeForm');
+                        const modal = document.getElementById('addEmployeeModal');
+
+                        // Fill form
+                        form.querySelector('[name="first_name"]').value = emp.first_name || '';
+                        form.querySelector('[name="last_name"]').value = emp.last_name || '';
+                        form.querySelector('[name="email"]').value = emp.email || '';
+                        form.querySelector('[name="employee_id"]').value = emp.employee_id || '';
+                        form.querySelector('[name="department"]').value = emp.department || '';
+                        form.querySelector('[name="role"]').value = emp.role || '';
+                        form.querySelector('[name="category"]').value = emp.category || 'staff';
+                        
+                        // Add hidden ID field if editing
+                        if (!form.querySelector('[name="id"]')) {
+                            const idInput = document.createElement('input');
+                            idInput.type = 'hidden';
+                            idInput.name = 'id';
+                            form.appendChild(idInput);
+                        }
+                        form.querySelector('[name="id"]').value = emp.id;
+
+                        // Update modal title
+                        modal.querySelector('h3').textContent = 'Edit Employee';
+
+                        // Show modal
+                        modal.classList.remove('hidden');
+                    } else {
+                        showToast('Error: ' + (data.message || 'Employee not found'), 'error');
+                    }
+                } catch (error) {
+                    showToast('Network error: ' + error.message, 'error');
+                } finally {
+                    button.innerHTML = '<i class="fas fa-edit"></i>';
+                }
+            });
+        });
+    }
+
+    // Initial load
+    loadEmployees(currentPage);
+
+    // Make loadEmployees available globally
+    window.loadEmployees = loadEmployees;
+});
+        
+</script>
+
+    
 </body>
 </html>
