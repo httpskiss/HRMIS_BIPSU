@@ -1,5 +1,5 @@
 <?php
-require 'db.php';
+require 'auth/db.php';
 
 $firstName = $_POST['firstName'] ?? '';
 $lastName = $_POST['lastName'] ?? '';
