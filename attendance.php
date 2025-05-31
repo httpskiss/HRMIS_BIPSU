@@ -1,9 +1,77 @@
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.html");
+    exit;
+}
+
+require 'auth/db.php';
+require 'models/Attendance.php';
+
+$attendanceModel = new Attendance();
+
+// Get current date and month info
+$currentDate = date('Y-m-d');
+$month = date('m');
+$year = date('Y');
+
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'mark':
+                $result = $attendanceModel->markAttendance(
+                    $_POST['user_id'],
+                    $_POST['date'],
+                    $_POST['status'],
+                    $_POST['check_in'],
+                    $_POST['check_out'],
+                    $_POST['notes'] ?? null
+                );
+                break;
+            case 'update':
+                $result = $attendanceModel->updateAttendance(
+                    $_POST['id'],
+                    $_POST['status'],
+                    $_POST['check_in'],
+                    $_POST['check_out'],
+                    $_POST['notes'] ?? null
+                );
+                break;
+            case 'delete':
+                $result = $attendanceModel->deleteAttendance($_POST['id']);
+                break;
+        }
+        
+        if ($result) {
+            $_SESSION['message'] = 'Attendance record updated successfully';
+            header("Location: attendance.php");
+            exit;
+        }
+    }
+}
+
+// Get data for display
+$dailyAttendance = $attendanceModel->getDailyAttendance($currentDate);
+$monthlySummary = $attendanceModel->getMonthlySummary($month, $year);
+
+// Get all employees for dropdown
+$employees = $pdo->query("SELECT id, CONCAT(first_name, ' ', last_name) as name, employee_id FROM users ORDER BY first_name")->fetchAll();
+
+// Calculate stats for cards
+$totalEmployees = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+$presentToday = $pdo->query("SELECT COUNT(*) FROM attendance WHERE date = '$currentDate' AND status = 'Present'")->fetchColumn();
+$absentToday = $pdo->query("SELECT COUNT(*) FROM attendance WHERE date = '$currentDate' AND status = 'Absent'")->fetchColumn();
+$onLeaveToday = $pdo->query("SELECT COUNT(*) FROM attendance WHERE date = '$currentDate' AND status = 'On Leave'")->fetchColumn();
+$lateToday = $pdo->query("SELECT COUNT(*) FROM attendance WHERE date = '$currentDate' AND status = 'Late'")->fetchColumn();
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HRMIS</title>
+    <title>HRMIS - Attendance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -73,27 +141,22 @@
             background-color: #EFF6FF;
             border: 1px solid #3B82F6;
         }
-
         .sidebar {
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-    transition: scrollbar-color 0.3s ease;
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+            transition: scrollbar-color 0.3s ease;
         }
-
         .sidebar:hover {
             scrollbar-color: rgba(255,255,255,0.3) transparent;
         }
-
         .sidebar::-webkit-scrollbar {
             width: 6px;
             background: transparent;
         }
-
         .sidebar::-webkit-scrollbar-thumb {
             background: transparent;
             border-radius: 3px;
         }
-
         .sidebar:hover::-webkit-scrollbar-thumb {
             background: rgba(255,255,255,0.3);
         }
@@ -101,7 +164,7 @@
 </head>
 <body class="bg-gray-100">
     <div class="flex h-screen overflow-hidden">
-         <!-- Sidebar -->
+        <!-- Sidebar (unchanged from your original) -->
         <div class="sidebar bg-blue-800 text-white w-64 fixed h-full overflow-y-auto">
             <div class="p-4 flex items-center space-x-3">
                 <img src="assets/images/uni_logo.png" alt="Uni Logo" class="h-auto max-h-12 w-auto max-w-full object-contain">
@@ -186,7 +249,7 @@
                                 <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</a>
                                 <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Settings</a>
                                 <div class="border-t border-gray-200"></div>
-                               <a href="logout.php" id="logoutBtn" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Logout</a>
+                                <a href="logout.php" id="logoutBtn" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Logout</a>
                             </div>
                         </div>
                     </div>
@@ -195,6 +258,18 @@
 
             <!-- Attendance Content -->
             <main class="p-6">
+                <?php if (isset($_SESSION['message'])): ?>
+                    <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6" role="alert">
+                        <span class="block sm:inline"><?= $_SESSION['message'] ?></span>
+                        <span class="absolute top-0 bottom-0 right-0 px-4 py-3">
+                            <button class="close-message" aria-label="Close">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </span>
+                    </div>
+                    <?php unset($_SESSION['message']); ?>
+                <?php endif; ?>
+
                 <!-- Filters and Actions -->
                 <div class="bg-white rounded-lg shadow p-6 mb-6">
                     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -202,11 +277,11 @@
                             <div class="relative">
                                 <select class="appearance-none bg-white border border-gray-300 rounded-md pl-3 pr-8 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
                                     <option>All Departments</option>
-                                    <option>Computer Science</option>
-                                    <option>Mathematics</option>
-                                    <option>Physics</option>
-                                    <option>Chemistry</option>
-                                    <option>Administration</option>
+                                    <?php 
+                                    $departments = $pdo->query("SELECT DISTINCT department FROM users")->fetchAll(PDO::FETCH_COLUMN);
+                                    foreach($departments as $dept): ?>
+                                        <option><?= htmlspecialchars($dept) ?></option>
+                                    <?php endforeach; ?>
                                 </select>
                                 <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
                                     <i class="fas fa-chevron-down text-xs"></i>
@@ -249,8 +324,8 @@
                             </div>
                             <div>
                                 <p class="text-gray-500">Today's Attendance</p>
-                                <h3 class="text-2xl font-bold">987/1,254</h3>
-                                <p class="text-green-500 text-sm">78.7% present</p>
+                                <h3 class="text-2xl font-bold"><?= $presentToday ?>/<?= $totalEmployees ?></h3>
+                                <p class="text-green-500 text-sm"><?= round(($presentToday/$totalEmployees)*100) ?>% present</p>
                             </div>
                         </div>
                     </div>
@@ -261,8 +336,8 @@
                             </div>
                             <div>
                                 <p class="text-gray-500">Present Today</p>
-                                <h3 class="text-2xl font-bold">987</h3>
-                                <p class="text-red-500 text-sm">222 absent</p>
+                                <h3 class="text-2xl font-bold"><?= $presentToday ?></h3>
+                                <p class="text-red-500 text-sm"><?= $absentToday ?> absent</p>
                             </div>
                         </div>
                     </div>
@@ -273,8 +348,8 @@
                             </div>
                             <div>
                                 <p class="text-gray-500">On Leave</p>
-                                <h3 class="text-2xl font-bold">45</h3>
-                                <p class="text-yellow-500 text-sm">3.6% of staff</p>
+                                <h3 class="text-2xl font-bold"><?= $onLeaveToday ?></h3>
+                                <p class="text-yellow-500 text-sm"><?= round(($onLeaveToday/$totalEmployees)*100) ?>% of staff</p>
                             </div>
                         </div>
                     </div>
@@ -285,8 +360,8 @@
                             </div>
                             <div>
                                 <p class="text-gray-500">Late Arrivals</p>
-                                <h3 class="text-2xl font-bold">32</h3>
-                                <p class="text-red-500 text-sm">3.2% of present</p>
+                                <h3 class="text-2xl font-bold"><?= $lateToday ?></h3>
+                                <p class="text-red-500 text-sm"><?= $presentToday > 0 ? round(($lateToday/$presentToday)*100) : 0 ?>% of present</p>
                             </div>
                         </div>
                     </div>
@@ -314,7 +389,7 @@
                     <!-- Daily Attendance Tab -->
                     <div id="daily" class="tab-content active p-6">
                         <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-lg font-semibold">Today's Attendance - June 15, 2023</h2>
+                            <h2 class="text-lg font-semibold">Today's Attendance - <?= date('F j, Y') ?></h2>
                             <div class="flex items-center space-x-2">
                                 <button class="px-3 py-1 border border-gray-300 rounded-md text-sm bg-white hover:bg-gray-50">
                                     <i class="fas fa-print mr-1"></i> Print
@@ -339,126 +414,49 @@
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php foreach($dailyAttendance as $record): ?>
                                     <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1001</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900"><?= 'EMP-'.$record['user_id'] ?></td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <div class="flex items-center">
                                                 <div class="flex-shrink-0 h-10 w-10">
-                                                    <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/32.jpg" alt="">
+                                                    <img class="h-10 w-10 rounded-full" src="https://ui-avatars.com/api/?name=<?= urlencode($record['first_name'].'+'.$record['last_name']) ?>" alt="">
                                                 </div>
                                                 <div class="ml-4">
-                                                    <div class="text-sm font-medium text-gray-900">Dr. John Smith</div>
-                                                    <div class="text-sm text-gray-500">Professor</div>
+                                                    <div class="text-sm font-medium text-gray-900"><?= $record['first_name'].' '.$record['last_name'] ?></div>
+                                                    <div class="text-sm text-gray-500"><?= $record['department'] ?></div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Computer Science</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">08:15 AM</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">05:30 PM</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= $record['check_in'] ? date('h:i A', strtotime($record['check_in'])) : '-' ?></td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500"><?= $record['check_out'] ? date('h:i A', strtotime($record['check_out'])) : '-' ?></td>
                                         <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Present</span>
+                                            <?php 
+                                            $statusClasses = [
+                                                'Present' => 'bg-green-100 text-green-800',
+                                                'Absent' => 'bg-red-100 text-red-800',
+                                                'On Leave' => 'bg-yellow-100 text-yellow-800',
+                                                'Late' => 'bg-blue-100 text-blue-800',
+                                                'Half Day' => 'bg-purple-100 text-purple-800'
+                                            ];
+                                            ?>
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?= $statusClasses[$record['status']] ?>">
+                                                <?= $record['status'] ?>
+                                            </span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                            <button class="text-red-600 hover:text-red-900">Delete</button>
+                                            <button class="text-blue-600 hover:text-blue-900 mr-3 edit-btn" 
+                                                    data-id="<?= $record['id'] ?>"
+                                                    data-status="<?= $record['status'] ?>"
+                                                    data-checkin="<?= $record['check_in'] ?>"
+                                                    data-checkout="<?= $record['check_out'] ?>"
+                                                    data-notes="<?= htmlspecialchars($record['notes'] ?? '') ?>">
+                                                Edit
+                                            </button>
+                                            <button class="text-red-600 hover:text-red-900 delete-btn" data-id="<?= $record['id'] ?>">Delete</button>
                                         </td>
                                     </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1002</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <div class="flex-shrink-0 h-10 w-10">
-                                                    <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/women/44.jpg" alt="">
-                                                </div>
-                                                <div class="ml-4">
-                                                    <div class="text-sm font-medium text-gray-900">Dr. Sarah Johnson</div>
-                                                    <div class="text-sm text-gray-500">Associate Professor</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Mathematics</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">08:22 AM</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Present</span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                            <button class="text-red-600 hover:text-red-900">Delete</button>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1003</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <div class="flex-shrink-0 h-10 w-10">
-                                                    <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/75.jpg" alt="">
-                                                </div>
-                                                <div class="ml-4">
-                                                    <div class="text-sm font-medium text-gray-900">Prof. Michael Brown</div>
-                                                    <div class="text-sm text-gray-500">Professor</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Physics</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">On Leave</span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                            <button class="text-red-600 hover:text-red-900">Delete</button>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1004</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <div class="flex-shrink-0 h-10 w-10">
-                                                    <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/women/63.jpg" alt="">
-                                                </div>
-                                                <div class="ml-4">
-                                                    <div class="text-sm font-medium text-gray-900">Dr. Lisa Ray</div>
-                                                    <div class="text-sm text-gray-500">Assistant Professor</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Chemistry</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">09:30 AM</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">05:15 PM</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Late</span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                            <button class="text-red-600 hover:text-red-900">Delete</button>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-1005</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <div class="flex-shrink-0 h-10 w-10">
-                                                    <img class="h-10 w-10 rounded-full" src="https://randomuser.me/api/portraits/men/42.jpg" alt="">
-                                                </div>
-                                                <div class="ml-4">
-                                                    <div class="text-sm font-medium text-gray-900">Dr. Robert Wilson</div>
-                                                    <div class="text-sm text-gray-500">HR Manager</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Administration</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">-</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Absent</span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <button class="text-blue-600 hover:text-blue-900 mr-3">Edit</button>
-                                            <button class="text-red-600 hover:text-red-900">Delete</button>
-                                        </td>
-                                    </tr>
+                                    <?php endforeach; ?>
                                 </tbody>
                             </table>
                         </div>
@@ -470,7 +468,7 @@
                             <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
                                 <div>
                                     <p class="text-sm text-gray-700">
-                                        Showing <span class="font-medium">1</span> to <span class="font-medium">5</span> of <span class="font-medium">1,254</span> records
+                                        Showing <span class="font-medium">1</span> to <span class="font-medium"><?= count($dailyAttendance) ?></span> of <span class="font-medium"><?= $totalEmployees ?></span> records
                                     </p>
                                 </div>
                                 <div>
@@ -497,13 +495,13 @@
                     <!-- Monthly Summary Tab -->
                     <div id="monthly" class="tab-content p-6">
                         <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-                            <h2 class="text-lg font-semibold">Monthly Attendance Summary - June 2023</h2>
+                            <h2 class="text-lg font-semibold">Monthly Attendance Summary - <?= date('F Y') ?></h2>
                             <div class="flex items-center space-x-4 mt-4 md:mt-0">
                                 <div class="flex items-center">
                                     <button id="prevMonth" class="p-2 rounded-full hover:bg-gray-100">
                                         <i class="fas fa-chevron-left"></i>
                                     </button>
-                                    <span class="mx-2 text-gray-700">June 2023</span>
+                                    <span class="mx-2 text-gray-700"><?= date('F Y') ?></span>
                                     <button id="nextMonth" class="p-2 rounded-full hover:bg-gray-100">
                                         <i class="fas fa-chevron-right"></i>
                                     </button>
@@ -520,9 +518,9 @@
                                     <h3 class="text-md font-medium">Attendance Overview</h3>
                                     <select class="border rounded px-3 py-1 text-sm">
                                         <option>All Departments</option>
-                                        <option>Computer Science</option>
-                                        <option>Mathematics</option>
-                                        <option>Physics</option>
+                                        <?php foreach($departments as $dept): ?>
+                                            <option><?= htmlspecialchars($dept) ?></option>
+                                        <?php endforeach; ?>
                                     </select>
                                 </div>
                                 <div class="chart-container">
@@ -532,48 +530,63 @@
                             
                             <div class="bg-white rounded-lg shadow p-6">
                                 <h3 class="text-md font-medium mb-4">Attendance Statistics</h3>
+                                <?php
+                                $totalDays = count($monthlySummary);
+                                $totalPresent = array_sum(array_column($monthlySummary, 'present'));
+                                $totalAbsent = array_sum(array_column($monthlySummary, 'absent'));
+                                $totalLeave = array_sum(array_column($monthlySummary, 'on_leave'));
+                                $totalLate = array_sum(array_column($monthlySummary, 'late'));
+                                $totalHalfDay = array_sum(array_column($monthlySummary, 'half_day'));
+                                
+                                $presentPercentage = $totalDays > 0 ? round(($totalPresent / ($totalDays * $totalEmployees)) * 100, 1) : 0;
+                                $absentPercentage = $totalDays > 0 ? round(($totalAbsent / ($totalDays * $totalEmployees)) * 100, 1) : 0;
+                                $leavePercentage = $totalDays > 0 ? round(($totalLeave / ($totalDays * $totalEmployees)) * 100, 1) : 0;
+                                $latePercentage = $totalDays > 0 ? round(($totalLate / ($totalDays * $totalEmployees)) * 100, 1) : 0;
+                                ?>
                                 <div class="space-y-4">
                                     <div>
                                         <div class="flex justify-between mb-1">
                                             <span class="text-sm font-medium text-gray-700">Present</span>
-                                            <span class="text-sm font-medium">78.7%</span>
+                                            <span class="text-sm font-medium"><?= $presentPercentage ?>%</span>
                                         </div>
                                         <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="bg-green-600 h-2 rounded-full" style="width: 78.7%"></div>
+                                            <div class="bg-green-600 h-2 rounded-full" style="width: <?= $presentPercentage ?>%"></div>
                                         </div>
                                     </div>
                                     <div>
                                         <div class="flex justify-between mb-1">
                                             <span class="text-sm font-medium text-gray-700">Absent</span>
-                                            <span class="text-sm font-medium">17.7%</span>
+                                            <span class="text-sm font-medium"><?= $absentPercentage ?>%</span>
                                         </div>
                                         <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="bg-red-600 h-2 rounded-full" style="width: 17.7%"></div>
+                                            <div class="bg-red-600 h-2 rounded-full" style="width: <?= $absentPercentage ?>%"></div>
                                         </div>
                                     </div>
                                     <div>
                                         <div class="flex justify-between mb-1">
                                             <span class="text-sm font-medium text-gray-700">On Leave</span>
-                                            <span class="text-sm font-medium">3.6%</span>
+                                            <span class="text-sm font-medium"><?= $leavePercentage ?>%</span>
                                         </div>
                                         <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="bg-yellow-500 h-2 rounded-full" style="width: 3.6%"></div>
+                                            <div class="bg-yellow-500 h-2 rounded-full" style="width: <?= $leavePercentage ?>%"></div>
                                         </div>
                                     </div>
                                     <div>
                                         <div class="flex justify-between mb-1">
                                             <span class="text-sm font-medium text-gray-700">Late Arrivals</span>
-                                            <span class="text-sm font-medium">3.2%</span>
+                                            <span class="text-sm font-medium"><?= $latePercentage ?>%</span>
                                         </div>
                                         <div class="w-full bg-gray-200 rounded-full h-2">
-                                            <div class="bg-purple-600 h-2 rounded-full" style="width: 3.2%"></div>
+                                            <div class="bg-purple-600 h-2 rounded-full" style="width: <?= $latePercentage ?>%"></div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="bg-white rounded-lg shadow p-6 mb-6">
+                        <!-- Rest of the monthly tab content remains similar but uses $monthlySummary data -->
+                        <!-- Department-wise table and calendar would go here -->
+                         <div class="bg-white rounded-lg shadow p-6 mb-6">
                             <h3 class="text-md font-medium mb-4">Department-wise Attendance</h3>
                             <div class="overflow-x-auto">
                                 <table class="min-w-full divide-y divide-gray-200">
@@ -642,8 +655,7 @@
                                 </table>
                             </div>
                         </div>
-                        
-                        <div class="bg-white rounded-lg shadow p-6">
+                          <div class="bg-white rounded-lg shadow p-6">
                             <h3 class="text-md font-medium mb-4">Monthly Calendar</h3>
                             <div class="attendance-calendar">
                                 <div class="grid grid-cols-7 gap-1 mb-2">
@@ -724,6 +736,174 @@
                         </div>
                     </div>
 
+                    <!-- Reports and Settings tabs would follow the same pattern -->
+                      <!-- Settings Tab -->
+                    <div id="settings" class="tab-content p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-lg font-semibold">Attendance Settings</h2>
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center text-sm">
+                                <i class="fas fa-save mr-2"></i> Save Settings
+                            </button>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                            <div class="bg-white rounded-lg shadow p-6">
+                                <h3 class="text-md font-medium mb-4">General Settings</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Work Week</label>
+                                        <div class="flex flex-wrap gap-3">
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
+                                                <span class="ml-2 text-sm">Sun</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
+                                                <span class="ml-2 text-sm">Mon</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
+                                                <span class="ml-2 text-sm">Tue</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
+                                                <span class="ml-2 text-sm">Wed</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
+                                                <span class="ml-2 text-sm">Thu</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                                                <span class="ml-2 text-sm">Fri</span>
+                                            </label>
+                                            <label class="inline-flex items-center">
+                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
+                                                <span class="ml-2 text-sm">Sat</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Work Start Time</label>
+                                            <input type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="08:00">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Work End Time</label>
+                                            <input type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="17:00">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Late Arrival Threshold (minutes)</label>
+                                        <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="15">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Half Day Threshold (hours)</label>
+                                        <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="4">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-white rounded-lg shadow p-6">
+                                <h3 class="text-md font-medium mb-4">Holidays</h3>
+                                <div class="mb-4">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <h4 class="text-sm font-medium text-gray-700">Upcoming Holidays</h4>
+                                        <button class="text-blue-600 hover:text-blue-800 text-sm flex items-center">
+                                            <i class="fas fa-plus mr-1"></i> Add Holiday
+                                        </button>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <div class="flex justify-between items-center p-2 border rounded-lg">
+                                            <div>
+                                                <p class="text-sm font-medium">Eid al-Adha</p>
+                                                <p class="text-xs text-gray-500">June 28, 2023</p>
+                                            </div>
+                                            <button class="text-red-600 hover:text-red-800">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                        <div class="flex justify-between items-center p-2 border rounded-lg">
+                                            <div>
+                                                <p class="text-sm font-medium">Independence Day</p>
+                                                <p class="text-xs text-gray-500">July 4, 2023</p>
+                                            </div>
+                                            <button class="text-red-600 hover:text-red-800">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                        <div class="flex justify-between items-center p-2 border rounded-lg">
+                                            <div>
+                                                <p class="text-sm font-medium">Labor Day</p>
+                                                <p class="text-xs text-gray-500">September 5, 2023</p>
+                                            </div>
+                                            <button class="text-red-600 hover:text-red-800">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-700 mb-2">Import Holidays</h4>
+                                    <div class="flex items-center space-x-2">
+                                        <select class="border rounded px-3 py-1 text-sm">
+                                            <option>Select Country</option>
+                                            <option>United States</option>
+                                            <option>United Kingdom</option>
+                                            <option>Canada</option>
+                                            <option>Australia</option>
+                                        </select>
+                                        <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                            Import
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white rounded-lg shadow p-6">
+                            <h3 class="text-md font-medium mb-4">Attendance Methods</h3>
+                            <div class="space-y-4">
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        <input id="biometric" name="biometric" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
+                                    </div>
+                                    <div class="ml-3 text-sm">
+                                        <label for="biometric" class="font-medium text-gray-700">Biometric Attendance</label>
+                                        <p class="text-gray-500">Allow employees to check-in/out using fingerprint or facial recognition</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        <input id="mobile" name="mobile" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
+                                    </div>
+                                    <div class="ml-3 text-sm">
+                                        <label for="mobile" class="font-medium text-gray-700">Mobile App Attendance</label>
+                                        <p class="text-gray-500">Allow employees to check-in/out using the mobile application</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        <input id="web" name="web" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded">
+                                    </div>
+                                    <div class="ml-3 text-sm">
+                                        <label for="web" class="font-medium text-gray-700">Web Check-in</label>
+                                        <p class="text-gray-500">Allow employees to check-in/out using the web portal</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-start">
+                                    <div class="flex items-center h-5">
+                                        <input id="geo" name="geo" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
+                                    </div>
+                                    <div class="ml-3 text-sm">
+                                        <label for="geo" class="font-medium text-gray-700">Geolocation Verification</label>
+                                        <p class="text-gray-500">Require employees to be within campus boundaries when checking in/out</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                     
                     <!-- Reports Tab -->
                     <div id="reports" class="tab-content p-6">
                         <div class="flex justify-between items-center mb-6">
@@ -937,173 +1117,6 @@
                             </div>
                         </div>
                     </div>
-
-                    <!-- Settings Tab -->
-                    <div id="settings" class="tab-content p-6">
-                        <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-lg font-semibold">Attendance Settings</h2>
-                            <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center text-sm">
-                                <i class="fas fa-save mr-2"></i> Save Settings
-                            </button>
-                        </div>
-                        
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                            <div class="bg-white rounded-lg shadow p-6">
-                                <h3 class="text-md font-medium mb-4">General Settings</h3>
-                                <div class="space-y-4">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Work Week</label>
-                                        <div class="flex flex-wrap gap-3">
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
-                                                <span class="ml-2 text-sm">Sun</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
-                                                <span class="ml-2 text-sm">Mon</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
-                                                <span class="ml-2 text-sm">Tue</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
-                                                <span class="ml-2 text-sm">Wed</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" checked>
-                                                <span class="ml-2 text-sm">Thu</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
-                                                <span class="ml-2 text-sm">Fri</span>
-                                            </label>
-                                            <label class="inline-flex items-center">
-                                                <input type="checkbox" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
-                                                <span class="ml-2 text-sm">Sat</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Work Start Time</label>
-                                            <input type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="08:00">
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Work End Time</label>
-                                            <input type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="17:00">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Late Arrival Threshold (minutes)</label>
-                                        <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="15">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Half Day Threshold (hours)</label>
-                                        <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" value="4">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="bg-white rounded-lg shadow p-6">
-                                <h3 class="text-md font-medium mb-4">Holidays</h3>
-                                <div class="mb-4">
-                                    <div class="flex justify-between items-center mb-2">
-                                        <h4 class="text-sm font-medium text-gray-700">Upcoming Holidays</h4>
-                                        <button class="text-blue-600 hover:text-blue-800 text-sm flex items-center">
-                                            <i class="fas fa-plus mr-1"></i> Add Holiday
-                                        </button>
-                                    </div>
-                                    <div class="space-y-2">
-                                        <div class="flex justify-between items-center p-2 border rounded-lg">
-                                            <div>
-                                                <p class="text-sm font-medium">Eid al-Adha</p>
-                                                <p class="text-xs text-gray-500">June 28, 2023</p>
-                                            </div>
-                                            <button class="text-red-600 hover:text-red-800">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2 border rounded-lg">
-                                            <div>
-                                                <p class="text-sm font-medium">Independence Day</p>
-                                                <p class="text-xs text-gray-500">July 4, 2023</p>
-                                            </div>
-                                            <button class="text-red-600 hover:text-red-800">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                        <div class="flex justify-between items-center p-2 border rounded-lg">
-                                            <div>
-                                                <p class="text-sm font-medium">Labor Day</p>
-                                                <p class="text-xs text-gray-500">September 5, 2023</p>
-                                            </div>
-                                            <button class="text-red-600 hover:text-red-800">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <h4 class="text-sm font-medium text-gray-700 mb-2">Import Holidays</h4>
-                                    <div class="flex items-center space-x-2">
-                                        <select class="border rounded px-3 py-1 text-sm">
-                                            <option>Select Country</option>
-                                            <option>United States</option>
-                                            <option>United Kingdom</option>
-                                            <option>Canada</option>
-                                            <option>Australia</option>
-                                        </select>
-                                        <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                            Import
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="bg-white rounded-lg shadow p-6">
-                            <h3 class="text-md font-medium mb-4">Attendance Methods</h3>
-                            <div class="space-y-4">
-                                <div class="flex items-start">
-                                    <div class="flex items-center h-5">
-                                        <input id="biometric" name="biometric" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
-                                    </div>
-                                    <div class="ml-3 text-sm">
-                                        <label for="biometric" class="font-medium text-gray-700">Biometric Attendance</label>
-                                        <p class="text-gray-500">Allow employees to check-in/out using fingerprint or facial recognition</p>
-                                    </div>
-                                </div>
-                                <div class="flex items-start">
-                                    <div class="flex items-center h-5">
-                                        <input id="mobile" name="mobile" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
-                                    </div>
-                                    <div class="ml-3 text-sm">
-                                        <label for="mobile" class="font-medium text-gray-700">Mobile App Attendance</label>
-                                        <p class="text-gray-500">Allow employees to check-in/out using the mobile application</p>
-                                    </div>
-                                </div>
-                                <div class="flex items-start">
-                                    <div class="flex items-center h-5">
-                                        <input id="web" name="web" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded">
-                                    </div>
-                                    <div class="ml-3 text-sm">
-                                        <label for="web" class="font-medium text-gray-700">Web Check-in</label>
-                                        <p class="text-gray-500">Allow employees to check-in/out using the web portal</p>
-                                    </div>
-                                </div>
-                                <div class="flex items-start">
-                                    <div class="flex items-center h-5">
-                                        <input id="geo" name="geo" type="checkbox" class="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" checked>
-                                    </div>
-                                    <div class="ml-3 text-sm">
-                                        <label for="geo" class="font-medium text-gray-700">Geolocation Verification</label>
-                                        <p class="text-gray-500">Require employees to be within campus boundaries when checking in/out</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </main>
         </div>
@@ -1114,44 +1127,303 @@
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-3xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center pb-3 border-b">
                 <h3 class="text-xl font-semibold">Mark Attendance</h3>
-                <button id="closeMarkAttendanceModal" class="text-gray-500 hover:text-gray-700">
+                <button class="close-modal text-gray-500 hover:text-gray-700">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="mt-4">
-                <form id="markAttendanceForm">
+                <form id="markAttendanceForm" method="POST">
+                    <input type="hidden" name="action" value="mark">
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-1">Select Employee</label>
-                        <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                        <select name="user_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                             <option value="">Select Employee</option>
-                            <option>Dr. John Smith (EMP-1001)</option>
-                            <option>Dr. Sarah Johnson (EMP-1002)</option>
-                            <option>Prof. Michael Brown (EMP-1003)</option>
-                            <option>Dr. Lisa Ray (EMP-1004)</option>
-                            <option>Dr. Robert Wilson (EMP-1005)</option>
+                            <?php foreach($employees as $emp): ?>
+                                <option value="<?= $emp['id'] ?>"><?= $emp['name'] ?> (<?= $emp['employee_id'] ?>)</option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                            <input type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                            <input type="date" name="date" value="<?= date('Y-m-d') ?>" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                            <select class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
-                                <option value="">Select Status</option>
-                                <option>Present</option>
-                                <option>Absent</option>
-                                <option>On Leave</option>
-                                <option>Late</option>
-                                <option>Half Day</option>
+                            <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                                <option value="Present">Present</option>
+                                <option value="Absent">Absent</option>
+                                <option value="On Leave">On Leave</option>
+                                <option value="Late">Late</option>
+                                <option value="Half Day">Half Day</option>
                             </select>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Check-in Time</label>
-                            <input type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <input type="time" name="check_in" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
                         </div>
-                        <
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Check-out Time</label>
+                            <input type="time" name="check_out" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                        <textarea name="notes" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="button" class="close-modal mr-3 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                            Save Attendance
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Attendance Modal -->
+    <div id="editAttendanceModal" class="modal fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-3xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center pb-3 border-b">
+                <h3 class="text-xl font-semibold">Edit Attendance Record</h3>
+                <button class="close-modal text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="mt-4">
+                <form id="editAttendanceForm" method="POST">
+                    <input type="hidden" name="action" value="update">
+                    <input type="hidden" name="id" id="editAttendanceId">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                            <select name="status" id="editStatus" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                                <option value="Present">Present</option>
+                                <option value="Absent">Absent</option>
+                                <option value="On Leave">On Leave</option>
+                                <option value="Late">Late</option>
+                                <option value="Half Day">Half Day</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                            <input type="date" name="date" id="editDate" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" required>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Check-in Time</label>
+                            <input type="time" name="check_in" id="editCheckIn" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Check-out Time</label>
+                            <input type="time" name="check_out" id="editCheckOut" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                        <textarea name="notes" id="editNotes" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"></textarea>
+                    </div>
+                    <div class="flex justify-end">
+                        <button type="button" class="close-modal mr-3 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                            Update Attendance
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="mt-3 text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                    <i class="fas fa-exclamation-triangle text-red-600"></i>
+                </div>
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mt-2">Delete Attendance Record</h3>
+                <div class="mt-2 px-7 py-3">
+                    <p class="text-sm text-gray-500">Are you sure you want to delete this attendance record? This action cannot be undone.</p>
+                </div>
+                <div class="items-center px-4 py-3">
+                    <form id="deleteForm" method="POST">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" id="deleteId">
+                        <button type="button" class="close-modal mr-2 px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md text-sm font-medium hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Toggle Sidebar
+        document.getElementById('toggleSidebar').addEventListener('click', function() {
+            const sidebar = document.querySelector('.sidebar');
+            sidebar.classList.toggle('collapsed');
+            
+            const icon = this.querySelector('i');
+            if (sidebar.classList.contains('collapsed')) {
+                icon.classList.remove('fa-chevron-left');
+                icon.classList.add('fa-chevron-right');
+                this.querySelector('.nav-text').textContent = 'Expand';
+            } else {
+                icon.classList.remove('fa-chevron-right');
+                icon.classList.add('fa-chevron-left');
+                this.querySelector('.nav-text').textContent = 'Collapse';
+            }
+        });
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const tabId = this.dataset.tab;
+                
+                // Update active tab button
+                document.querySelectorAll('.tab-btn').forEach(tb => {
+                    tb.classList.remove('border-blue-500', 'text-blue-600');
+                    tb.classList.add('border-transparent', 'text-gray-500');
+                });
+                this.classList.add('border-blue-500', 'text-blue-600');
+                this.classList.remove('border-transparent', 'text-gray-500');
+                
+                // Update active tab content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+
+        // Modal handling
+        const markAttendanceBtn = document.getElementById('markAttendanceBtn');
+        const markAttendanceModal = document.getElementById('markAttendanceModal');
+        const editAttendanceModal = document.getElementById('editAttendanceModal');
+        const deleteModal = document.getElementById('deleteModal');
+        const closeModalButtons = document.querySelectorAll('.close-modal');
+        
+        if (markAttendanceBtn) {
+            markAttendanceBtn.addEventListener('click', () => {
+                markAttendanceModal.classList.remove('hidden');
+            });
+        }
+        
+        closeModalButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                markAttendanceModal.classList.add('hidden');
+                editAttendanceModal.classList.add('hidden');
+                deleteModal.classList.add('hidden');
+            });
+        });
+        
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target === markAttendanceModal) markAttendanceModal.classList.add('hidden');
+            if (e.target === editAttendanceModal) editAttendanceModal.classList.add('hidden');
+            if (e.target === deleteModal) deleteModal.classList.add('hidden');
+        });
+
+        // Edit button handling
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.getElementById('editAttendanceId').value = this.dataset.id;
+                document.getElementById('editStatus').value = this.dataset.status;
+                document.getElementById('editCheckIn').value = this.dataset.checkin;
+                document.getElementById('editCheckOut').value = this.dataset.checkout;
+                document.getElementById('editNotes').value = this.dataset.notes;
+                document.getElementById('editDate').value = '<?= $currentDate ?>';
+                editAttendanceModal.classList.remove('hidden');
+            });
+        });
+
+        // Delete button handling
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.getElementById('deleteId').value = this.dataset.id;
+                deleteModal.classList.remove('hidden');
+            });
+        });
+
+        // Close message alert
+        document.querySelector('.close-message')?.addEventListener('click', function() {
+            this.closest('.bg-green-100').remove();
+        });
+
+        // Initialize charts
+        document.addEventListener('DOMContentLoaded', function() {
+            // Monthly trend chart
+            const monthlyData = <?= json_encode($monthlySummary) ?>;
+            const trendCtx = document.getElementById('attendanceTrendChart')?.getContext('2d');
+            
+            if (trendCtx) {
+                new Chart(trendCtx, {
+                    type: 'line',
+                    data: {
+                        labels: monthlyData.map(item => new Date(item.date).getDate()),
+                        datasets: [
+                            {
+                                label: 'Present',
+                                data: monthlyData.map(item => item.present),
+                                borderColor: '#10B981',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Absent',
+                                data: monthlyData.map(item => item.absent),
+                                borderColor: '#EF4444',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                tension: 0.3
+                            },
+                            {
+                                label: 'On Leave',
+                                data: monthlyData.map(item => item.on_leave),
+                                borderColor: '#F59E0B',
+                                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    precision: 0
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Month navigation
+            document.getElementById('prevMonth')?.addEventListener('click', function() {
+                // Implement month navigation with AJAX
+                console.log('Previous month clicked');
+            });
+            
+            document.getElementById('nextMonth')?.addEventListener('click', function() {
+                // Implement month navigation with AJAX
+                console.log('Next month clicked');
+            });
+        });
+    </script>
+</body>
 </html>

@@ -1,3 +1,129 @@
+<?php
+session_start();
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.html");
+    exit;
+}
+
+require 'auth/db.php'; // Database connection
+
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'add':
+                addEmployee($pdo);
+                break;
+            case 'edit':
+                editEmployee($pdo);
+                break;
+            case 'delete':
+                deleteEmployee($pdo);
+                break;
+        }
+    }
+}
+
+// Fetch all employees
+$employees = $pdo->query("
+    SELECT id, first_name, last_name, email, employee_id, department, role, category, created_at 
+    FROM users 
+    ORDER BY created_at DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// Fetch unique departments for filter
+$departments = $pdo->query("SELECT DISTINCT department FROM users ORDER BY department")->fetchAll(PDO::FETCH_COLUMN);
+
+function addEmployee($pdo) {
+    $required = ['first_name', 'last_name', 'email', 'employee_id', 'department', 'role'];
+    foreach ($required as $field) {
+        if (empty($_POST[$field])) {
+            echo json_encode(['success' => false, 'message' => "$field is required"]);
+            return;
+        }
+    }
+
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO users 
+            (first_name, last_name, email, password, employee_id, department, role, category, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ");
+        
+        $password = password_hash('default123', PASSWORD_DEFAULT); // Default password, should be changed
+        $category = $_POST['category'] ?? 'staff';
+        
+        $stmt->execute([
+            $_POST['first_name'],
+            $_POST['last_name'],
+            $_POST['email'],
+            $password,
+            $_POST['employee_id'],
+            $_POST['department'],
+            $_POST['role'],
+            $category
+        ]);
+        
+        echo json_encode(['success' => true, 'message' => 'Employee added successfully']);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => 'Error adding employee: ' . $e->getMessage()]);
+    }
+}
+
+function editEmployee($pdo) {
+    if (empty($_POST['id'])) {
+        echo json_encode(['success' => false, 'message' => 'Employee ID is required']);
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE users SET 
+                first_name = ?,
+                last_name = ?,
+                email = ?,
+                employee_id = ?,
+                department = ?,
+                role = ?,
+                category = ?
+            WHERE id = ?
+        ");
+        
+        $stmt->execute([
+            $_POST['first_name'],
+            $_POST['last_name'],
+            $_POST['email'],
+            $_POST['employee_id'],
+            $_POST['department'],
+            $_POST['role'],
+            $_POST['category'] ?? 'staff',
+            $_POST['id']
+        ]);
+        
+        echo json_encode(['success' => true, 'message' => 'Employee updated successfully']);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => 'Error updating employee: ' . $e->getMessage()]);
+    }
+}
+
+function deleteEmployee($pdo) {
+    if (empty($_POST['id'])) {
+        echo json_encode(['success' => false, 'message' => 'Employee ID is required']);
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+        $stmt->execute([$_POST['id']]);
+        
+        echo json_encode(['success' => true, 'message' => 'Employee deleted successfully']);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => 'Error deleting employee: ' . $e->getMessage()]);
+    }
+}
+
+$departments = $pdo->query("SELECT DISTINCT department FROM users WHERE department IS NOT NULL ORDER BY department")->fetchAll(PDO::FETCH_COLUMN);
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -197,14 +323,9 @@
                             class="block w-full md:w-48 pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
                         >
                             <option value="">All Departments</option>
-                            <option>Computer Science</option>
-                            <option>Mathematics</option>
-                            <option>Physics</option>
-                            <option>Chemistry</option>
-                            <option>Biology</option>
-                            <option>Administration</option>
-                            <option>Human Resources</option>
-                            <option>Finance</option>
+                            <template x-for="dept in departments" :key="dept">
+                                <option x-text="dept" :value="dept"></option>
+                            </template>
                         </select>
                         <select 
                             x-model="selectedStatus" 
@@ -585,42 +706,32 @@
                                 :readonly="isEditing"
                             >
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Department *</label>
-                            <select 
-                                x-model="currentEmployee.department"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" 
-                                required
-                            >
-                                <option value="">Select Department</option>
-                                <option>Computer Science</option>
-                                <option>Mathematics</option>
-                                <option>Physics</option>
-                                <option>Chemistry</option>
-                                <option>Biology</option>
-                                <option>Administration</option>
-                                <option>Human Resources</option>
-                                <option>Finance</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Position *</label>
-                            <select 
-                                x-model="currentEmployee.position"
-                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" 
-                                required
-                            >
-                                <option value="">Select Position</option>
-                                <option>Professor</option>
-                                <option>Associate Professor</option>
-                                <option>Assistant Professor</option>
-                                <option>Lecturer</option>
-                                <option>Researcher</option>
-                                <option>HR Manager</option>
-                                <option>Finance Officer</option>
-                                <option>Administrative Staff</option>
-                            </select>
-                        </div>
+                       <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Department *</label>
+                        <select 
+                            x-model="currentEmployee.department"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" 
+                            required
+                        >
+                            <option value="">Select Department</option>
+                            <template x-for="dept in departments" :key="dept">
+                                <option x-text="dept" :value="dept"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Position *</label>
+                        <select 
+                            x-model="currentEmployee.position"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" 
+                            required
+                        >
+                            <option value="">Select Position</option>
+                            <option value="employee">Employee</option>
+                            <option value="manager">Manager</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
                             <select 
@@ -928,231 +1039,97 @@
 
         // Employee Module Functionality
         function employeeModule() {
-            return {
-                // Data
-                employees: [
-                    {
-                        id: 'EMP-1001',
-                        firstName: 'John',
-                        lastName: 'Smith',
-                        name: 'Dr. John Smith',
-                        email: 'john.smith@university.edu',
-                        phone: '(555) 123-4567',
-                        gender: 'Male',
-                        dob: '1975-05-15',
-                        photo: 'https://randomuser.me/api/portraits/men/32.jpg',
-                        department: 'Computer Science',
-                        position: 'Professor',
-                        status: 'Active',
-                        hireDate: '2010-08-20',
-                        salary: '95000',
-                        address: '123 University Ave, Apt 4B, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Mary Smith',
-                            phone: '(555) 987-6543',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1002',
-                        firstName: 'Sarah',
-                        lastName: 'Johnson',
-                        name: 'Dr. Sarah Johnson',
-                        email: 'sarah.j@university.edu',
-                        phone: '(555) 234-5678',
-                        gender: 'Female',
-                        dob: '1980-11-22',
-                        photo: 'https://randomuser.me/api/portraits/women/44.jpg',
-                        department: 'Mathematics',
-                        position: 'Associate Professor',
-                        status: 'Active',
-                        hireDate: '2015-03-10',
-                        salary: '82000',
-                        address: '456 College Street, Unit 12, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Robert Johnson',
-                            phone: '(555) 876-5432',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1003',
-                        firstName: 'Michael',
-                        lastName: 'Brown',
-                        name: 'Prof. Michael Brown',
-                        email: 'michael.b@university.edu',
-                        phone: '(555) 345-6789',
-                        gender: 'Male',
-                        dob: '1968-07-30',
-                        photo: 'https://randomuser.me/api/portraits/men/75.jpg',
-                        department: 'Physics',
-                        position: 'Professor',
-                        status: 'On Leave',
-                        hireDate: '2008-01-15',
-                        salary: '105000',
-                        address: '789 Scholar Lane, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Jennifer Brown',
-                            phone: '(555) 765-4321',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1004',
-                        firstName: 'Lisa',
-                        lastName: 'Ray',
-                        name: 'Dr. Lisa Ray',
-                        email: 'lisa.ray@university.edu',
-                        phone: '(555) 456-7890',
-                        gender: 'Female',
-                        dob: '1972-09-18',
-                        photo: 'https://randomuser.me/api/portraits/women/63.jpg',
-                        department: 'Chemistry',
-                        position: 'Assistant Professor',
-                        status: 'Active',
-                        hireDate: '2018-06-05',
-                        salary: '75000',
-                        address: '321 Academic Way, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'David Ray',
-                            phone: '(555) 654-3210',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1005',
-                        firstName: 'Robert',
-                        lastName: 'Wilson',
-                        name: 'Dr. Robert Wilson',
-                        email: 'robert.w@university.edu',
-                        phone: '(555) 567-8901',
-                        gender: 'Male',
-                        dob: '1978-03-25',
-                        photo: 'https://randomuser.me/api/portraits/men/42.jpg',
-                        department: 'Administration',
-                        position: 'HR Manager',
-                        status: 'Active',
-                        hireDate: '2016-09-12',
-                        salary: '88000',
-                        address: '654 Faculty Road, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Susan Wilson',
-                            phone: '(555) 543-2109',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1006',
-                        firstName: 'Emily',
-                        lastName: 'Davis',
-                        name: 'Dr. Emily Davis',
-                        email: 'emily.d@university.edu',
-                        phone: '(555) 678-9012',
-                        gender: 'Female',
-                        dob: '1985-12-08',
-                        photo: 'https://randomuser.me/api/portraits/women/28.jpg',
-                        department: 'Biology',
-                        position: 'Lecturer',
-                        status: 'Active',
-                        hireDate: '2019-04-22',
-                        salary: '68000',
-                        address: '987 Research Blvd, Apt 7C, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'James Davis',
-                            phone: '(555) 432-1098',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1007',
-                        firstName: 'David',
-                        lastName: 'Martinez',
-                        name: 'Dr. David Martinez',
-                        email: 'david.m@university.edu',
-                        phone: '(555) 789-0123',
-                        gender: 'Male',
-                        dob: '1970-06-14',
-                        photo: 'https://randomuser.me/api/portraits/men/85.jpg',
-                        department: 'Computer Science',
-                        position: 'Associate Professor',
-                        status: 'Active',
-                        hireDate: '2013-11-03',
-                        salary: '92000',
-                        address: '159 Tech Park, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Maria Martinez',
-                            phone: '(555) 321-0987',
-                            relationship: 'Spouse'
-                        }
-                    },
-                    {
-                        id: 'EMP-1008',
-                        firstName: 'Jennifer',
-                        lastName: 'Lee',
-                        name: 'Dr. Jennifer Lee',
-                        email: 'jennifer.l@university.edu',
-                        phone: '(555) 890-1234',
-                        gender: 'Female',
-                        dob: '1982-04-19',
-                        photo: 'https://randomuser.me/api/portraits/women/37.jpg',
-                        department: 'Mathematics',
-                        position: 'Assistant Professor',
-                        status: 'Active',
-                        hireDate: '2020-02-18',
-                        salary: '78000',
-                        address: '753 Algorithm Street, Boston, MA 02115',
-                        emergencyContact: {
-                            name: 'Thomas Lee',
-                            phone: '(555) 210-9876',
-                            relationship: 'Spouse'
-                        }
-                    }
-                ],
-                filteredEmployees: [],
-                currentEmployee: {
-                    id: '',
-                    firstName: '',
-                    lastName: '',
+        return {
+            // Data
+            employees: <?= json_encode(array_map(function($emp) {
+                return [
+                    'id' => $emp['employee_id'],
+                    'firstName' => $emp['first_name'],
+                    'lastName' => $emp['last_name'],
+                    'name' => $emp['first_name'] . ' ' . $emp['last_name'],
+                    'email' => $emp['email'],
+                    'phone' => '', // Add if you have phone in DB
+                    'gender' => '', // Add if you have gender in DB
+                    'photo' => 'https://ui-avatars.com/api/?name=' . urlencode($emp['first_name'] . '+' . $emp['last_name']),
+                    'department' => $emp['department'],
+                    'position' => $emp['role'],
+                    'status' => 'Active', // Add status field if you have it in DB
+                    'category' => $emp['category'] ?? 'staff',
+                    'hireDate' => $emp['created_at'],
+                    'emergencyContact' => [
+                        'name' => '',
+                        'phone' => '',
+                        'relationship' => ''
+                    ]
+                ];
+            }, $employees)) ?>,
+            departments: <?= json_encode($departments) ?>,
+            filteredEmployees: [],
+            currentEmployee: {
+                id: '',
+                firstName: '',
+                lastName: '',
+                name: '',
+                email: '',
+                phone: '',
+                gender: '',
+                photo: '',
+                department: '',
+                position: '',
+                status: '',
+                hireDate: '',
+                category: 'staff',
+                emergencyContact: {
                     name: '',
-                    email: '',
                     phone: '',
-                    gender: '',
-                    dob: '',
-                    photo: '',
-                    department: '',
-                    position: '',
-                    status: '',
-                    hireDate: '',
-                    salary: '',
-                    address: '',
-                    emergencyContact: {
-                        name: '',
-                        phone: '',
-                        relationship: ''
-                    }
-                },
-                viewedEmployee: {},
-                employeeToDelete: null,
-                employeeToDeleteName: '',
-                searchQuery: '',
-                selectedDepartment: '',
-                selectedStatus: '',
-                viewMode: 'list',
-                isEmployeeModalOpen: false,
-                isViewModalOpen: false,
-                isDeleteModalOpen: false,
-                isEditing: false,
-                sortColumn: 'id',
-                sortDirection: 'asc',
-                pageSize: 8,
-                currentPage: 1,
-                visiblePages: [1, 2, 3, 4, 5],
+                    relationship: ''
+                }
+            },
+            viewedEmployee: {},
+            employeeToDelete: null,
+            employeeToDeleteName: '',
+            searchQuery: '',
+            selectedDepartment: '',
+            selectedStatus: '',
+            viewMode: 'list',
+            isEmployeeModalOpen: false,
+            isViewModalOpen: false,
+            isDeleteModalOpen: false,
+            isEditing: false,
+            sortColumn: 'id',
+            sortDirection: 'asc',
+            pageSize: 8,
+            currentPage: 1,
+            visiblePages: [1, 2, 3, 4, 5],
 
-                // Methods
-                init() {
-                    this.filterEmployees();
-                    this.generateEmployeePhotos();
-                },
+
+             // Methods
+            init() {
+                this.filterEmployees();
+            },
+
+            filterEmployees() {
+                this.filteredEmployees = this.employees.filter(employee => {
+                    const matchesSearch = 
+                        employee.name.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                        employee.email.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                        employee.id.toLowerCase().includes(this.searchQuery.toLowerCase());
+                    
+                    const matchesDepartment = 
+                        !this.selectedDepartment || 
+                        employee.department === this.selectedDepartment;
+                    
+                    const matchesStatus = 
+                        !this.selectedStatus || 
+                        employee.status === this.selectedStatus;
+                    
+                    return matchesSearch && matchesDepartment && matchesStatus;
+                });
+
+                this.sortEmployees(this.sortColumn, false);
+                this.currentPage = 1;
+                this.updateVisiblePages();
+            },
 
                 generateEmployeePhotos() {
                     // Generate random photos for employees who don't have one
@@ -1287,40 +1264,42 @@
                     }
                 },
 
-                saveEmployee() {
-                    if (this.isEditing) {
-                        // Update existing employee
-                        const index = this.employees.findIndex(e => e.id === this.currentEmployee.id);
-                        if (index !== -1) {
-                            // Combine first and last name for display
-                            this.currentEmployee.name = `${this.currentEmployee.firstName} ${this.currentEmployee.lastName}`;
-                            if (this.currentEmployee.position.includes('Professor') || this.currentEmployee.position.includes('Dr.')) {
-                                this.currentEmployee.name = `Dr. ${this.currentEmployee.name}`;
-                            }
-                            
-                            this.employees[index] = {...this.currentEmployee};
-                        }
+                  saveEmployee() {
+                const formData = new FormData();
+                formData.append('action', this.isEditing ? 'edit' : 'add');
+                
+                // Add all employee data to formData
+                formData.append('first_name', this.currentEmployee.firstName);
+                formData.append('last_name', this.currentEmployee.lastName);
+                formData.append('email', this.currentEmployee.email);
+                formData.append('employee_id', this.currentEmployee.id);
+                formData.append('department', this.currentEmployee.department);
+                formData.append('role', this.currentEmployee.position);
+                formData.append('category', this.currentEmployee.category);
+                
+                if (this.isEditing) {
+                    formData.append('id', this.currentEmployee.dbId); // You'll need to add dbId to track the database ID
+                }
+
+                fetch('employees.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Refresh the employee list
+                        window.location.reload();
                     } else {
-                        // Add new employee
-                        // Combine first and last name for display
-                        this.currentEmployee.name = `${this.currentEmployee.firstName} ${this.currentEmployee.lastName}`;
-                        if (this.currentEmployee.position.includes('Professor') || this.currentEmployee.position.includes('Dr.')) {
-                            this.currentEmployee.name = `Dr. ${this.currentEmployee.name}`;
-                        }
-                        
-                        // Generate random photo if not provided
-                        if (!this.currentEmployee.photo) {
-                            const gender = this.currentEmployee.gender.toLowerCase() || 'men';
-                            const randomId = Math.floor(Math.random() * 100);
-                            this.currentEmployee.photo = `https://randomuser.me/api/portraits/${gender}/${randomId}.jpg`;
-                        }
-                        
-                        this.employees.unshift({...this.currentEmployee});
+                        alert('Error: ' + data.message);
                     }
-                    
-                    this.filterEmployees();
-                    this.closeEmployeeModal();
-                },
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred');
+                });
+            },
+
 
                 closeEmployeeModal() {
                     this.isEmployeeModalOpen = false;
@@ -1347,17 +1326,32 @@
                     }
                 },
 
-                deleteEmployee() {
-                    this.employees = this.employees.filter(e => e.id !== this.employeeToDelete);
-                    this.filterEmployees();
-                    this.closeDeleteModal();
-                },
+                    deleteEmployee() {
+                if (!this.employeeToDelete) return;
 
-                closeDeleteModal() {
-                    this.isDeleteModalOpen = false;
-                    this.employeeToDelete = null;
-                    this.employeeToDeleteName = '';
-                }
+                const formData = new FormData();
+                formData.append('action', 'delete');
+                formData.append('id', this.employeeToDelete);
+
+                fetch('employees.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Refresh the employee list
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred');
+                });
+            }
+          
             }
         }
     </script>
